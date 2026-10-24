@@ -1,0 +1,7 @@
+# Local env / secrets — never commit
+.vscode/dev.env
+*.local.env
+
+# Build output
+/bin/
+*.exe

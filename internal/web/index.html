@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Freight Class Recommender — Handling Unit</title>
+  <style>
+    :root {
+      --pb-purple: #6b1f7c;
+      --pb-magenta: #cf0989;
+      --ink: #2b2b33;
+      --muted: #6b7280;
+      --line: #d7d7e0;
+      --bg: #f4f4f7;
+      --suggest: #2563eb;
+      --confirm: #16a34a;
+      --save: #0891b2;
+      --warn: #d97706;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--ink); background: var(--bg);
+    }
+    header {
+      background: linear-gradient(90deg, var(--pb-purple), var(--pb-magenta));
+      color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 12px;
+    }
+    header .logo {
+      width: 26px; height: 26px; border-radius: 50%; background: #fff;
+      color: var(--pb-purple); display: grid; place-items: center; font-weight: 700;
+    }
+    header h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .3px; }
+    .page-title { padding: 18px 24px 4px; color: var(--pb-magenta); font-size: 22px; }
+    main { padding: 16px 24px 48px; max-width: 920px; }
+    .card {
+      background: #fff; border: 1px solid var(--line); border-radius: 8px;
+      padding: 20px 22px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .card h2 { font-size: 15px; margin: 0 0 16px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 16px; }
+    .field { display: flex; flex-direction: column; min-width: 0; }
+    .field.col2 { grid-column: span 2; }
+    .field.colfull { grid-column: 1 / -1; }
+    label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+      color: var(--muted); margin-bottom: 5px;
+    }
+    .optional { text-transform: none; font-style: italic; color: #9aa0ab; }
+    input, select {
+      width: 100%; min-width: 0; height: 36px; padding: 6px 10px; border: 1px solid var(--line);
+      border-radius: 4px; font-size: 14px; background: #fff; color: var(--ink);
+    }
+    input[readonly] { background: #ececf1; color: var(--muted); cursor: not-allowed; }
+    .unit-row { display: flex; gap: 8px; align-items: center; }
+    .unit-row input { flex: 1 1 auto; min-width: 0; }
+    .unit-row .suffix { flex: 0 0 auto; white-space: nowrap; font-size: 12px; color: var(--muted); }
+    .reco { margin-top: 18px; }
+    .banner {
+      border-left: 5px solid var(--muted); border-radius: 6px;
+      background: #fff; border: 1px solid var(--line); border-left-width: 5px;
+      padding: 14px 16px; display: none;
+    }
+    .banner.show { display: block; }
+    .banner .tag {
+      display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; padding: 2px 8px; border-radius: 10px; color: #fff; margin-bottom: 6px;
+    }
+    .banner .headline { font-size: 15px; font-weight: 600; margin: 2px 0 4px; }
+    .banner .msg { font-size: 13px; color: #44474f; line-height: 1.45; }
+    .banner .meta { margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .banner .risk { margin-top: 8px; font-size: 12px; font-weight: 600; }
+    .b-suggest { border-left-color: var(--suggest); }
+    .b-suggest .tag { background: var(--suggest); }
+    .b-confirm { border-left-color: var(--confirm); }
+    .b-confirm .tag { background: var(--confirm); }
+    .b-save { border-left-color: var(--save); }
+    .b-save .tag { background: var(--save); }
+    .b-warn { border-left-color: var(--warn); }
+    .b-warn .tag { background: var(--warn); }
+    .risk-high { color: var(--warn); }
+    .risk-medium { color: #b45309; }
+    .risk-low { color: var(--muted); }
+    .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">pb</div>
+    <h1>pitney bowes — Shipping</h1>
+  </header>
+
+  <div class="page-title">Handling Unit</div>
+
+  <main>
+    <div class="card">
+      <h2>Handling Unit</h2>
+      <div class="grid">
+        <div class="field">
+          <label for="length">Length</label>
+          <div class="unit-row">
+            <input id="length" type="number" min="0" step="0.1" value="48" />
+            <span class="suffix">in</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="width">Width</label>
+          <div class="unit-row">
+            <input id="width" type="number" min="0" step="0.1" value="40" />
+            <span class="suffix">in</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="height">Height</label>
+          <div class="unit-row">
+            <input id="height" type="number" min="0" step="0.1" value="36" />
+            <span class="suffix">in</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="cube">Cube <span class="optional">(auto)</span></label>
+          <div class="unit-row">
+            <input id="cube" type="number" min="0" step="0.01" placeholder="auto" readonly />
+            <span class="suffix">cu ft</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="weightLbs">Unit Weight</label>
+          <div class="unit-row">
+            <input id="weightLbs" type="number" min="0" step="0.1" value="450" />
+            <span class="suffix">lbs</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="weightOz">&nbsp;</label>
+          <div class="unit-row">
+            <input id="weightOz" type="number" min="0" step="1" value="0" />
+            <span class="suffix">oz</span>
+          </div>
+        </div>
+        <div class="field col2">
+          <label for="freightClass">Freight Class</label>
+          <select id="freightClass">
+            <option value="">Select</option>
+          </select>
+        </div>
+        <div class="field colfull">
+          <label for="nmfc">NMFC / Description of goods <span class="optional">(optional)</span></label>
+          <input id="nmfc" type="text" placeholder="e.g. ping pong balls, machine parts, books, mattress" />
+        </div>
+      </div>
+
+      <p class="hint">Cube is computed automatically from L × W × H.</p>
+
+      <div class="reco">
+        <div id="banner" class="banner">
+          <span id="tag" class="tag"></span>
+          <div id="headline" class="headline"></div>
+          <div id="msg" class="msg"></div>
+          <div id="meta" class="meta"></div>
+          <div id="nmfcInfo" class="meta"></div>
+          <div id="risk" class="risk"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const CLASSES = [50, 55, 60, 65, 70, 77.5, 85, 92.5, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500];
+    const sel = document.getElementById("freightClass");
+    for (const c of CLASSES) {
+      const o = document.createElement("option");
+      o.value = String(c); o.textContent = "Class " + c;
+      sel.appendChild(o);
+    }
+
+    const el = (id) => document.getElementById(id);
+    const num = (id) => parseFloat(el(id).value);
+    const STATE_META = {
+      suggest: { cls: "b-suggest", tag: "Suggestion", head: "Suggested freight class" },
+      confirm: { cls: "b-confirm", tag: "Confirmed", head: "Class matches density" },
+      save:    { cls: "b-save",    tag: "Save tip",  head: "You may be over-declaring" },
+      warn:    { cls: "b-warn",    tag: "Warning",   head: "Under-declaration risk" },
+    };
+
+    function buildPayload() {
+      const lbs = isNaN(num("weightLbs")) ? 0 : num("weightLbs");
+      const oz = isNaN(num("weightOz")) ? 0 : num("weightOz");
+      const payload = {
+        length: isNaN(num("length")) ? 0 : num("length"),
+        width: isNaN(num("width")) ? 0 : num("width"),
+        height: isNaN(num("height")) ? 0 : num("height"),
+        weightLbs: lbs + oz / 16,
+      };
+      if (sel.value !== "") payload.selectedClass = parseFloat(sel.value);
+      const desc = el("nmfc").value.trim();
+      if (desc !== "") payload.description = desc;
+      return payload;
+    }
+
+    // Cube is read-only; populate it from L x W x H for display.
+    function syncCube(payload) {
+      const v = (payload.length * payload.width * payload.height) / 1728;
+      el("cube").value = v > 0 ? v.toFixed(2) : "";
+    }
+
+    function render(rec) {
+      const b = el("banner");
+      const meta = STATE_META[rec.state] || STATE_META.suggest;
+      b.className = "banner show " + meta.cls;
+      el("tag").textContent = meta.tag;
+      el("headline").textContent = meta.head + " — class " + rec.recommendedClass;
+      el("msg").textContent = rec.message || "";
+      el("meta").textContent = "Density: " + rec.density.toFixed(1) + " lb/ft³" +
+        (rec.selectedClass != null ? "  •  Selected: " + rec.selectedClass : "");
+      const nmfc = el("nmfcInfo");
+      if (rec.nmfcCode) {
+        nmfc.textContent = "NMFC " + rec.nmfcCode + " — " + rec.nmfcDescription +
+          (rec.nmfcFixedClass ? "  •  fixed class (overrides density)" : "  •  density-rated");
+      } else {
+        nmfc.textContent = "";
+      }
+      const risk = el("risk");
+      if (rec.riskLevel && rec.riskLevel !== "none") {
+        risk.textContent = "Boundary risk: " + rec.riskLevel;
+        risk.className = "risk risk-" + rec.riskLevel;
+      } else {
+        risk.textContent = "";
+      }
+    }
+
+    let timer = null;
+    async function recommend() {
+      const payload = buildPayload();
+      syncCube(payload);
+      if (payload.weightLbs <= 0 || payload.length <= 0 || payload.width <= 0 || payload.height <= 0) {
+        el("banner").className = "banner";
+        return;
+      }
+      try {
+        const res = await fetch("/api/v1/freightclass/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) { el("banner").className = "banner"; return; }
+        render(await res.json());
+      } catch (e) {
+        el("banner").className = "banner";
+      }
+    }
+
+    function schedule() {
+      clearTimeout(timer);
+      timer = setTimeout(recommend, 250);
+    }
+
+    for (const id of ["length", "width", "height", "weightLbs", "weightOz", "nmfc"]) {
+      el(id).addEventListener("input", schedule);
+    }
+    sel.addEventListener("change", recommend);
+
+    recommend();
+  </script>
+</body>
+</html>
