@@ -3,7 +3,7 @@
 **Team:** Right on Class
 **Members:** Shivika Pruthi, Vaibhav Chichmalkar, Abhinav Kumar
 **Track:** Agentify / Agentic Shipping & Mailing Experience
-**Status:** POC Draft
+**Status:** POC — Phase 1 & 2 implemented
 **Last updated:** 2026-10-23
 
 ---
@@ -64,10 +64,10 @@ Density        = Weight (lbs) / Volume (cu ft)
 Class          = density → NMFC density scale lookup
 ```
 
-> **Note on CUBE:** CUBE is an **optional** field — it will not always be present. When a
-> **dimensioner** supplies it, the UI shows it read-only and we treat it as a trusted
-> volume. When it is absent, we compute volume from L/W/H. So **L/W/H + Weight is the
-> primary, always-available path**; cube is used directly only when provided.
+> **Note on CUBE:** CUBE is **always calculated from the L/W/H dimensions**
+> (Cube = L×W×H / 1728), whether those dimensions are **entered by the user or measured by a
+> dimensioner**. It is shown **read-only** — the user never edits it directly. So
+> **L/W/H + Weight is the single source of truth** for volume and density.
 
 ### Density → Class scale (standard NMFC density breakpoints)
 
@@ -86,7 +86,10 @@ Class          = density → NMFC density scale lookup
 
 AI/intelligence earns its place only at the edges:
 - **NMFC matcher** — map free-text product description to the right NMFC item (some items are
-  *fixed-class* regardless of density).
+  *fixed-class* regardless of density). This is our primary **AI use case**: the matcher is a
+  pluggable `NMFCMatcher` interface. The demo ships a deterministic keyword matcher over a
+  curated catalog; an **LLM/semantic matcher slots in behind the same interface** (see
+  *LLM integration* in §8) — no change to the recommend pipeline or UI contract.
 - **Risk checker** — flag borderline density, vague descriptions, box-only vs. palletized cube.
 
 ---
@@ -148,32 +151,30 @@ compelling demo moment ("we caught a borderline case before the carrier did").
 
 ```mermaid
 flowchart TD
-    A[User enters L / W / H + Weight<br/>on Handling Unit screen] --> B{Cube provided<br/>by dimensioner?}
-    B -->|Yes| C[Use measured cube]
-    B -->|No| D[Cube = L×W×H / 1728]
-    C --> E[Density = Weight / Cube]
-    D --> E
+    A[User enters L / W / H + Weight<br/>Handling Unit demo UI] --> P[POST /api/v1/freightclass/recommend<br/>pbgolib appserver · unauthenticated]
+    P --> D[CubeFromDims = L×W×H / 1728<br/>read-only · from user/dimensioner dims]
+    D --> E[Density = Weight / Cube]
 
-    A -.optional.-> N[Product description]
-    N --> M[NMFC Matcher<br/>semantic / LLM]
+    A -.optional.-> N[Description of goods]
+    N --> M[MatchNMFC<br/>deterministic keyword match<br/>curated catalog · LLM future]
     M --> F{Fixed-class<br/>item?}
-    F -->|Yes| G[Use fixed class]
-    F -->|No| H[Class = ClassForDensity]
+    F -->|Yes| G[Use fixed class<br/>overrides density]
+    F -->|No| H[ClassForDensity]
     E --> H
 
-    E --> K[Boundary / Risk Checker<br/>near-cutoff, vague desc, box-only cube]
+    E --> K[BoundaryRisk<br/>near-cutoff check<br/>density-based only]
 
-    G --> R[Recommendation engine]
+    G --> R[Recommend<br/>state machine]
     H --> R
     K --> R
 
     R --> S{Compare with<br/>user selection}
-    S -->|No selection| T[State A: Suggest]
-    S -->|Matches| U[State B: Confirm ✓]
-    S -->|Higher than needed| V[State C: Save tip]
-    S -->|Lower than needed| W[State D: Risk warning]
+    S -->|No selection| T[State A: suggest]
+    S -->|Matches| U[State B: confirm]
+    S -->|Higher than needed| V[State C: save]
+    S -->|Lower than needed| W[State D: warn]
 
-    T --> Z[Non-intrusive pop-up<br/>User decides — no auto-select]
+    T --> Z[Non-intrusive banner<br/>User decides — no auto-select]
     U --> Z
     V --> Z
     W --> Z
@@ -183,48 +184,101 @@ flowchart TD
 
 ## 8. Technical Approach
 
-**Stack:** Go backend + a lightweight demo UI mirroring the Handling Unit screen.
+**Stack:** Go backend built on Pitney Bowes **`pbgolib`** (no external web frameworks) +
+a lightweight embedded demo UI mirroring the Handling Unit screen. Module
+`github.com/vairarchi/freight-class-recommender` (Go 1.27 toolchain).
 
-**`freightclass` package (pure Go, deterministic, unit-tested):**
-- `CubeFromDims(l, w, h float64) float64` — ÷1728, used only when cube not supplied
-- `Density(weightLbs, cubeFt float64) float64`
-- `ClassForDensity(density float64) Class` — the lookup table above
+**Project layout:**
+- `internal/freightclass/` — core engine (pure, deterministic, unit-tested)
+  - `calculator.go` — `CubeFromDims`, `Density`, `ClassForDensity`, `BoundaryRisk`, `Recommend`
+  - `nmfc.go` — `NMFCItem`, curated sample catalog, `NMFCMatcher` interface + `KeywordMatcher`
+  - `nmfc_llm.go` — `LLMMatcher` scaffold (AI seam, `TODO(llm)`)
+  - `types.go` — `Input`, `Recommendation`, `Class`, `RiskLevel`
+  - `freightclass.go` — `Context` + `RecommendAPI` handler (pbgolib `respond` / `logging`)
+- `internal/web/` — single-page demo UI embedded via `//go:embed`
+- `internal/utils/` — `GetPayload` (JSON decode + `resterrors`)
+- `cmd/freight-class-recommender/` — `main.go` wires routes and starts the pbgolib server
+
+**Core functions (pure Go, deterministic, unit-tested):**
+- `CubeFromDims(l, w, h float64) float64` — computes CUBE from L/W/H (÷1728)
+- `Density(weightLbs, cubeFt float64) float64` — guards divide-by-zero
+- `ClassForDensity(density float64) Class` — the density scale lookup above
 - `BoundaryRisk(density float64) (RiskLevel, message)` — near-cutoff detection
-- `Recommend(input) Recommendation` — runs the state machine
+- `MatchNMFC(description string) (NMFCItem, bool)` — keyword match over the curated catalog
+- `Recommend(input) Recommendation` — computes cube → density → class, applies any NMFC
+  fixed-class override, checks boundary risk, and runs the state machine
+
+**`Input` (request):**
+```go
+type Input struct {
+    Length, Width, Height float64
+    Cube                  *float64 // optional override; demo always computes from L/W/H
+    WeightLbs             float64
+    SelectedClass         *float64 // nil = not chosen yet
+    Description           string   // free-text goods description → NMFC match
+}
+```
 
 **`Recommendation` result (UI contract):**
 ```go
 type Recommendation struct {
     RecommendedClass float64
     Density          float64
-    SelectedClass    *float64 // nil = not chosen yet
-    State            string   // "suggest" | "confirm" | "save" | "warn"
+    SelectedClass    *float64  // nil = not chosen yet
+    State            string    // "suggest" | "confirm" | "save" | "warn"
     Message          string
-    RiskLevel        string   // none | low | medium | high
+    RiskLevel        RiskLevel // none | low | medium | high
     CostTip          string
+    NMFCCode         string    // matched NMFC item (if any)
+    NMFCDescription  string
+    NMFCFixedClass   bool      // true = class fixed by NMFC, overrides density
 }
 ```
 
-**HTTP layer:** `POST /recommend` — accepts L/W/H (or cube), weight, optional selected class →
-returns the JSON above.
+**HTTP layer (pbgolib `appserver`):**
+- `POST /api/v1/freightclass/recommend` — accepts the `Input` JSON → returns the `Recommendation`
+- `GET /` — serves the embedded demo UI
+- Routes are registered as **unauthenticated** (V1 `appserver.Start`) so the demo bypasses
+  token verification. Production can move them to authenticated `RouteV2`.
 
-**UI:** single page matching the Handling Unit screenshot; on input change it calls
-`/recommend` and renders the pop-up/banner.
+**UI:** single embedded page matching the Handling Unit screenshot; CUBE is read-only and
+auto-computed from L/W/H. On input change it calls the recommend endpoint and renders the
+non-intrusive banner (suggest / confirm / save / warn) plus boundary-risk and NMFC match info.
 
-**AI extensions (phase 2+):** NMFC matcher and risk checker slot behind the same `Recommend`
-call without changing the UI contract.
+**AI extensions:** the Phase 2 NMFC matcher is currently a **deterministic keyword matcher**
+over a small curated catalog (no external LLM/libs). A semantic/LLM matcher can slot behind
+the same `MatchNMFC` / `Recommend` calls without changing the UI contract.
+
+**LLM integration (AI use case — future TODO):** the matcher is a pluggable interface, so an
+LLM can be dropped in without touching the calculator, HTTP layer, or UI:
+```go
+// nmfc.go — the seam
+type NMFCMatcher interface {
+    Match(ctx context.Context, description string) (NMFCItem, bool, error)
+}
+var Matcher NMFCMatcher = KeywordMatcher{} // swap this to go AI
+```
+- `KeywordMatcher` — deterministic, offline; powers the demo and the LLM **fallback**.
+- `LLMMatcher` (`nmfc_llm.go`) — scaffold with a documented `TODO(llm)`. Enable it in one line:
+  `freightclass.Matcher = freightclass.NewLLMMatcher()`.
+- Planned `LLMMatcher.Match` flow: build a grounded prompt from the description + NMFC
+  candidates (few-shot or embeddings/RAG over the licensed NMFC book) → call the model via
+  **pbgolib `restclient`** (no external SDKs) with `ctx` → parse structured JSON
+  `{code, description, fixedClass, confidence}` → confidence-gate → **fall back to
+  `KeywordMatcher`** on low confidence or error so the demo never breaks.
 
 ---
 
 ## 9. Phased Scope
 
-| Phase | Deliverable | AI? | Demo value |
+| Phase | Deliverable | AI? | Status |
 |---|---|---|---|
-| **1 — Core** | Density → class calculator + boundary flags + `/recommend` + state machine | No | Always-correct, standalone demo |
-| **2 — AI matcher** | Free-text description → NMFC item + fixed-class handling | Yes | The intelligence story |
-| **3 — Risk + savings** | Richer risk checks, packing/palletizing tips, cost direction | Yes | The "wow" / differentiator |
+| **1 — Core** | Density → class calculator + boundary flags + `/recommend` + state machine | No | ✅ Implemented |
+| **2 — NMFC matcher** | Free-text description → NMFC item + fixed-class handling | Deterministic (keyword; LLM future) | ✅ Implemented |
+| **3 — Risk + savings** | Richer risk checks, packing/palletizing tips, cost direction | Yes | ⏳ Planned |
 
-Phase 1 guarantees a working demo even if later phases stay rough.
+Phase 1 guarantees a working demo even if later phases stay rough. Phases 1 and 2 are built,
+unit-tested, and wired into the demo UI; boundary risk flags were included in Phase 1.
 
 ---
 
@@ -239,10 +293,14 @@ Phase 1 guarantees a working demo even if later phases stay rough.
 
 ## 11. Open Questions for the Team
 
-1. Include **boundary risk flags** in Phase 1 (cheap) or defer to the Phase 3 risk checker?
+1. ~~Include **boundary risk flags** in Phase 1 (cheap) or defer to the Phase 3 risk checker?~~
+   **Resolved:** included in Phase 1.
 2. Cost tips **qualitative** ("lower class, lower cost") or do we have **rate data** for dollar figures?
-3. NMFC data: build a **small curated sample set** for the demo (full NMFC book is licensed)?
-4. Confirm the demo UI should visually match the Handling Unit screenshot.
+   *(Current: qualitative; no rate data wired yet.)*
+3. ~~NMFC data: build a **small curated sample set** for the demo (full NMFC book is licensed)?~~
+   **Resolved:** curated sample catalog built in `nmfc.go`.
+4. ~~Confirm the demo UI should visually match the Handling Unit screenshot.~~
+   **Resolved:** demo UI mirrors the Handling Unit screen.
 
 ---
 
