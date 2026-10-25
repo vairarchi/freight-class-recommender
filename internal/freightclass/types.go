@@ -22,6 +22,7 @@ type Input struct {
 	Cube          *float64 `json:"cube,omitempty"` // nil = compute from dimensions
 	WeightLbs     float64  `json:"weightLbs"`
 	SelectedClass *float64 `json:"selectedClass,omitempty"` // nil = user has not chosen yet
+	NMFCCode      string   `json:"nmfcCode,omitempty"`      // user-declared NMFC code (authoritative)
 	Description   string   `json:"description,omitempty"`   // free-text goods description for NMFC match
 }
 
@@ -34,7 +35,10 @@ type Recommendation struct {
 	Message          string    `json:"message"`
 	RiskLevel        RiskLevel `json:"riskLevel"`
 	CostTip          string    `json:"costTip"`
+	PackingTip       string    `json:"packingTip,omitempty"`  // Phase 3: reach a cheaper class via tighter packing
+	TargetClass      float64   `json:"targetClass,omitempty"` // the cheaper class the packing tip reaches
 	NMFCCode         string    `json:"nmfcCode,omitempty"`
 	NMFCDescription  string    `json:"nmfcDescription,omitempty"`
 	NMFCFixedClass   bool      `json:"nmfcFixedClass"`
+	NMFCSource       string    `json:"nmfcSource,omitempty"` // "code" (declared) | "description" (matched)
 }

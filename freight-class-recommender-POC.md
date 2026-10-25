@@ -92,6 +92,113 @@ AI/intelligence earns its place only at the edges:
   *LLM integration* in §8) — no change to the recommend pipeline or UI contract.
 - **Risk checker** — flag borderline density, vague descriptions, box-only vs. palletized cube.
 
+> ### ⭐ AI Use Case (highlighted): Semantic NMFC Matching
+>
+> **Where AI earns its place — and where it doesn't.** Density is deterministic math, so the
+> engine computes it exactly and we deliberately **do not** use an LLM for the calculation.
+> The AI is applied only at the *ambiguous edge*: turning a free-text goods description into the
+> correct NMFC item — especially **fixed-class** commodities whose class density alone gets wrong.
+>
+> **Why it beats keyword lookup.** The LLM understands *meaning* — synonyms, paraphrases, typos,
+> and multi-item descriptions a keyword table never will. It is **grounded** on the curated
+> catalog (returns a validated NMFC code, not free-form text), **confidence-gated**, and **falls
+> back** to the keyword matcher / density math, so results never break.
+>
+> **Live demo inputs** (type into *Description of goods*):
+>
+> | Input | AI maps to | Class | Path |
+> |---|---|---|---|
+> | `ping pong balls` | NMFC 86150 | **500** | keyword |
+> | `small lightweight white spheres used in a paddle table sport` | NMFC 86150 | **500** | **LLM only** |
+> | `a one-person boat you paddle down a river` | NMFC 32050 (kayak) | **400** | **LLM only** |
+> | `something soft you sleep on` | NMFC 124530 (mattress) | **150** | **LLM only** |
+> | `asdf qwerty` | no match | — | density fallback |
+>
+> *Suggested flow:* keyword hit → same item via a keyword-free paraphrase (the LLM did it) →
+> gibberish falls back to density-only. Verified live against AWS Bedrock (Claude).
+
+### Can we use AI for the calculations too? — Deliberately, no.
+
+We keep a strict division of labor: **math is deterministic, language/judgment is AI.**
+
+- **Math → deterministic engine.** Density (`weight ÷ cube`), the NMFC breakpoint lookup, boundary
+  flags, and the state machine have exactly one correct answer. Our Go code produces it instantly,
+  for free, and is **unit-tested at every breakpoint**.
+- **Why not an LLM for the math.** It would be slower and costlier, and models can mis-handle
+  numbers right at a cutoff (is `14.98` → class 70 or 77.5?). That is the *one* place a
+  hallucination is unacceptable — a wrong class is the exact problem we are solving. Deterministic
+  math is also **auditable and reproducible**; an LLM's arithmetic is not.
+- **Language/judgment → LLM.** "What *is* this commodity?" and "is it fixed-class?" — the
+  ambiguous, meaning-based edge where the LLM adds real value.
+
+**Where AI *can* legitimately assist the calculation flow — without replacing the math:**
+- **Sanity checks** — flag implausible input (e.g. "1 lb for a 48×40×48 pallet — did you mean 100 lb?").
+- **Packing / savings advice** (Phase 3) — "shaving 2 in off height moves class 85 → 77.5"; the LLM
+  *explains*, the engine *computes*.
+- **Unstructured input parsing** — extract dims/weight from a pasted packing list or a photo, then
+  feed the deterministic engine.
+
+> **Pitch point:** we used AI where it adds value and were disciplined enough *not* to use it where
+> it would add risk — LLM at the edges, deterministic core for anything numeric.
+
+### Demo cheat-sheet (AI/LLM)
+
+Type these into the **NMFC / Description of goods** field. Sourced from the curated catalog in
+`nmfc.go` (~34 items: 10 fixed-class + 24 density-rated). The keyword matcher uses **whole-word /
+phrase** matching, so `tire` no longer matches inside `entire`.
+
+**Fixed-class items — show the density override (the headline moment):**
+
+| Type this | → NMFC | Class |
+|---|---|---|
+| `a box of ping pong balls` | 86150 | **500** |
+| `an inflatable kayak` | 32050 | **400** |
+| `queen size mattress` | 124530 | **150** |
+| `bags of packing peanuts` | 156300 | **300** |
+| `decorative lamp shades` | 110400 | **500** |
+| `party balloons` | 13050 | **400** |
+| `throw pillows and cushions` | 125670 | **175** |
+| `a mountain bike` | 22400 | **150** |
+
+**Density-rated items (keyword matcher — instant, offline; class comes from density):**
+
+| Type this | → NMFC item |
+|---|---|
+| `a flat screen television` | 63700 electronics |
+| `winter clothes and apparel` | 49880 clothing |
+| `spare tires and brake pads` | 99080 automotive |
+| `assorted nuts and bolts` | 133300 fasteners |
+| `wooden office desk and chair` | 70720 furniture |
+| `canned food and bottled water` | 73380 foodstuffs |
+| `a drill and wrench set` | 110260 hand tools |
+| `a refrigerator` | 25120 appliances |
+| `aluminum sheet metal` | 120600 sheet metal |
+| `a pallet of bricks` | 133200 masonry |
+
+*(More catalog items: `steel pipe` 50700, `plywood boards` 85300, `ceramic tiles` 173680,
+`glassware` 86700, `rubber hose` 157200, `drum of adhesive` 43700, `cans of paint` 46400,
+`medical vials` 60600, `a treadmill and dumbbells` 180000, `shampoo and soap` 94500,
+`a plastic jug` 156600, `cardboard cartons` 29250.)*
+
+**Whole-word matcher in action:**
+- `the entire shipment is fragile` → **no match** (previously `tire` falsely hit automotive). ✅
+- `a set of spare tires` → still matches automotive 99080. ✅
+
+**LLM-only paraphrases — no keywords, only the LLM catches these (the "wow"):**
+
+| Type this | LLM maps to |
+|---|---|
+| `small lightweight white spheres used in a paddle table sport` | 86150 — ping pong → **500** |
+| `a one-person boat you paddle down a river` | 32050 — kayak → **400** |
+| `something soft you sleep on` | 124530 — mattress → **150** |
+| `the big appliance in the kitchen that keeps food cold` | 25120 — appliances |
+| `winter jackets and coats for a retail store` | 49880 — clothing |
+| `replacement alternator for a sedan` | 99080 — automotive |
+
+**Suggested 20-second flow:** `a box of ping pong balls` (keyword hit) → `small lightweight white
+spheres used in a paddle table sport` (same 500, but the LLM did it) → `asdf qwerty` (graceful
+fallback to density-only). That tells the whole keyword → LLM → fallback story.
+
 ---
 
 ## 5. Behavior: Recommend, Never Auto-Select
@@ -145,6 +252,19 @@ margin             = |15.0 - 14.9| / 15.0 = 0.67%  → within threshold → flag
 This is a small, deterministic addition to the core calculator — easy enough for Phase 1 and a
 compelling demo moment ("we caught a borderline case before the carrier did").
 
+**Phase 3 — directional risk + packing savings (implemented, deterministic):**
+- **Directional boundary risk.** The flag now states *which way* the risk runs: *just-above* a
+  cutoff warns that re-measurement could bump it into the pricier class; *just-below* points to a
+  packing opportunity toward the cheaper class.
+- **Packing-to-cheaper-class tip.** `SavingsOpportunity` computes the exact volume reduction needed
+  to raise density past the next breakpoint, and — when dims are known — translates it to inches
+  off the height. It only suggests a change when it is realistic (≤ ~15% of volume). Cost direction
+  is qualitative ("a lower, cheaper class"); no rate data is wired.
+
+  > *Example (48×40×36 @ 450 lb → density 11.25, class 92.5):* "Tighten packing by ~2.5 cu ft (≈6%)
+  > to raise density to 12.0 lb/ft³ and drop from class 92.5 to 85 — a lower, cheaper class. e.g.
+  > reduce height by ~2.2 in." Surfaced in the UI as a 💡 tip. Fixed-class items get no packing tip.
+
 ---
 
 ## 7. Flow Diagram
@@ -154,19 +274,20 @@ flowchart TD
     A[User enters L / W / H + Weight<br/>Handling Unit demo UI] --> P[POST /api/v1/freightclass/recommend<br/>pbgolib appserver · unauthenticated]
     P --> D[CubeFromDims = L×W×H / 1728<br/>read-only · from user/dimensioner dims]
     D --> E[Density = Weight / Cube]
+    E --> H[ClassForDensity + BoundaryRisk<br/>near-cutoff flag · density-based]
 
     A -.optional.-> N[Description of goods]
-    N --> M[MatchNMFC<br/>deterministic keyword match<br/>curated catalog · LLM future]
-    M --> F{Fixed-class<br/>item?}
-    F -->|Yes| G[Use fixed class<br/>overrides density]
-    F -->|No| H[ClassForDensity]
-    E --> H
+    N --> M[MatchNMFC → active NMFCMatcher]
+    M --> LLM[LLMMatcher · AWS Bedrock Claude<br/>grounded on catalog · confidence-gated]
+    LLM -->|low-confidence / error / not configured| KW[KeywordMatcher fallback<br/>curated catalog]
+    LLM -->|confident| F{Fixed-class<br/>item?}
+    KW --> F
+    F -->|Yes| G[Fixed class overrides density<br/>skip boundary risk]
+    F -->|No / no match| R
 
-    E --> K[BoundaryRisk<br/>near-cutoff check<br/>density-based only]
-
-    G --> R[Recommend<br/>state machine]
+    E --> R[Recommend · state machine]
     H --> R
-    K --> R
+    G --> R
 
     R --> S{Compare with<br/>user selection}
     S -->|No selection| T[State A: suggest]
@@ -215,9 +336,16 @@ type Input struct {
     Cube                  *float64 // optional override; demo always computes from L/W/H
     WeightLbs             float64
     SelectedClass         *float64 // nil = not chosen yet
-    Description           string   // free-text goods description → NMFC match
+    NMFCCode              string   // user-declared NMFC code (authoritative)
+    Description           string   // free-text goods description → keyword/LLM match
 }
 ```
+
+**NMFC resolution precedence** (prod-faithful two-field input): a **declared NMFC code** is
+authoritative and resolved deterministically (`matchByCode`); only when it is absent/unknown does
+the engine fall back to matching the **description** (keyword → LLM). The result reports
+`NMFCSource` as `"code"` or `"description"` so the UI can show *declared code* vs *matched from
+description*.
 
 **`Recommendation` result (UI contract):**
 ```go
@@ -229,6 +357,8 @@ type Recommendation struct {
     Message          string
     RiskLevel        RiskLevel // none | low | medium | high
     CostTip          string
+    PackingTip       string    // Phase 3: tighten-packing advice to reach a cheaper class
+    TargetClass      float64   // the cheaper class the packing tip reaches
     NMFCCode         string    // matched NMFC item (if any)
     NMFCDescription  string
     NMFCFixedClass   bool      // true = class fixed by NMFC, overrides density
@@ -249,23 +379,23 @@ non-intrusive banner (suggest / confirm / save / warn) plus boundary-risk and NM
 over a small curated catalog (no external LLM/libs). A semantic/LLM matcher can slot behind
 the same `MatchNMFC` / `Recommend` calls without changing the UI contract.
 
-**LLM integration (AI use case — future TODO):** the matcher is a pluggable interface, so an
-LLM can be dropped in without touching the calculator, HTTP layer, or UI:
+**LLM integration (AI use case — implemented):** the matcher is a pluggable interface, so the
+LLM is dropped in without touching the calculator, HTTP layer, or UI:
 ```go
 // nmfc.go — the seam
 type NMFCMatcher interface {
     Match(ctx context.Context, description string) (NMFCItem, bool, error)
 }
-var Matcher NMFCMatcher = KeywordMatcher{} // swap this to go AI
+var Matcher NMFCMatcher = KeywordMatcher{} // main.go swaps this to the LLM
 ```
 - `KeywordMatcher` — deterministic, offline; powers the demo and the LLM **fallback**.
-- `LLMMatcher` (`nmfc_llm.go`) — scaffold with a documented `TODO(llm)`. Enable it in one line:
-  `freightclass.Matcher = freightclass.NewLLMMatcher()`.
-- Planned `LLMMatcher.Match` flow: build a grounded prompt from the description + NMFC
-  candidates (few-shot or embeddings/RAG over the licensed NMFC book) → call the model via
-  **pbgolib `restclient`** (no external SDKs) with `ctx` → parse structured JSON
-  `{code, description, fixedClass, confidence}` → confidence-gate → **fall back to
-  `KeywordMatcher`** on low confidence or error so the demo never breaks.
+- `LLMMatcher` (`nmfc_llm.go`) — calls **AWS Bedrock** (Anthropic Claude) via stdlib `net/http`
+  (no AWS SDK): grounds the model with the curated catalog, requests strict JSON
+  `{code, description, fixedClass, confidence}`, **confidence-gates** the reply, maps the code
+  back to the catalog, and **falls back to `KeywordMatcher`** on low confidence or error.
+- Enabled in `main.go` via `freightclass.Matcher = freightclass.NewLLMMatcher()`; config comes
+  from `APP_BEDROCK_API_TOKEN` / `APP_BEDROCK_REGION` / `APP_BEDROCK_MODEL_ID` (read with
+  pbgolib `envvar`, loaded from `.vscode/dev.env`). The HTTP client is injectable for tests.
 
 ---
 
@@ -274,10 +404,10 @@ var Matcher NMFCMatcher = KeywordMatcher{} // swap this to go AI
 | Phase | Deliverable | AI? | Status |
 |---|---|---|---|
 | **1 — Core** | Density → class calculator + boundary flags + `/recommend` + state machine | No | ✅ Implemented |
-| **2 — NMFC matcher** | Free-text description → NMFC item + fixed-class handling | Deterministic (keyword; LLM future) | ✅ Implemented |
-| **3 — Risk + savings** | Richer risk checks, packing/palletizing tips, cost direction | Yes | ⏳ Planned |
+| **2 — NMFC matcher** | Free-text description → NMFC item + fixed-class handling | Yes — AWS Bedrock (Claude), keyword fallback | ✅ Implemented |
+| **3 — Risk + savings** | Directional boundary risk + packing-to-cheaper-class tips + cost direction | Deterministic (math) | ✅ Implemented |
 
-Phase 1 guarantees a working demo even if later phases stay rough. Phases 1 and 2 are built,
+Phase 1 guarantees a working demo even if later phases stay rough. All three phases are built,
 unit-tested, and wired into the demo UI; boundary risk flags were included in Phase 1.
 
 ---

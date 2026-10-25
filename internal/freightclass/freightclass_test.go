@@ -126,6 +126,21 @@ func TestMatchNMFC(t *testing.T) {
 	}
 }
 
+func TestKeywordWholeWord(t *testing.T) {
+	// "tire" must not match inside "entire".
+	if _, ok := MatchNMFC("the entire shipment is fragile"); ok {
+		t.Error("'entire' should not trigger a 'tire' keyword match")
+	}
+	// Exact word still matches.
+	if item, ok := MatchNMFC("a set of spare tires"); !ok || item.Code != "99080" {
+		t.Errorf("'tires' should match automotive 99080, got ok=%v code=%q", ok, item.Code)
+	}
+	// Multi-word phrase still matches.
+	if item, ok := MatchNMFC("bulk packing peanuts for void fill"); !ok || item.Code != "156300" {
+		t.Errorf("'packing peanuts' should match 156300, got ok=%v code=%q", ok, item.Code)
+	}
+}
+
 func TestRecommendFixedClassOverride(t *testing.T) {
 	// A dense box (class 50 by density) of ping pong balls -> fixed class 500.
 	in := Input{Cube: ptr(1), WeightLbs: 60, Description: "ping pong balls"}
@@ -147,5 +162,71 @@ func TestRecommendDensityItemKeepsDensityClass(t *testing.T) {
 	}
 	if got.NMFCCode == "" {
 		t.Error("should still report the matched NMFC code")
+	}
+}
+
+func TestNextHigherBreakpoint(t *testing.T) {
+	if got := nextHigherBreakpoint(11.25); got != 12 {
+		t.Errorf("nextHigherBreakpoint(11.25) = %v, want 12", got)
+	}
+	if got := nextHigherBreakpoint(60); got != -1 {
+		t.Errorf("nextHigherBreakpoint(60) = %v, want -1 (no higher cutoff)", got)
+	}
+}
+
+func TestSavingsOpportunity(t *testing.T) {
+	// density 11.25 (class 92.5) -> reachable 85 at density 12 with ~6% repack.
+	ps, ok := SavingsOpportunity(Input{Cube: ptr(12), WeightLbs: 135}, 11.25, 12, 92.5)
+	if !ok || ps.TargetClass != 85 {
+		t.Fatalf("expected savings to class 85, got ok=%v target=%v", ok, ps.TargetClass)
+	}
+	if ps.CubeReduction <= 0 || ps.Message == "" {
+		t.Errorf("expected positive cube reduction and message, got %+v", ps)
+	}
+	// Already cheapest class (50) -> no tip.
+	if _, ok := SavingsOpportunity(Input{Cube: ptr(1), WeightLbs: 60}, 60, 1, 50); ok {
+		t.Error("class 50 should have no cheaper target")
+	}
+	// Too much repacking required -> no tip.
+	if _, ok := SavingsOpportunity(Input{Cube: ptr(1), WeightLbs: 1.2}, 1.2, 1, 400); ok {
+		t.Error("~40% repack should be rejected as unrealistic")
+	}
+}
+
+func TestRecommendPackingTip(t *testing.T) {
+	// 48x40x36 @ 450 lbs -> density 11.25 class 92.5, reachable 85.
+	got := Recommend(Input{Length: 48, Width: 40, Height: 36, WeightLbs: 450})
+	if got.PackingTip == "" || got.TargetClass != 85 {
+		t.Errorf("expected packing tip to class 85, got tip=%q target=%v", got.PackingTip, got.TargetClass)
+	}
+	if !strings.Contains(got.PackingTip, "height") {
+		t.Errorf("dims path should mention height reduction, got %q", got.PackingTip)
+	}
+}
+
+func TestRecommendByCodePrecedence(t *testing.T) {
+	// A declared NMFC code is authoritative and beats the description match.
+	in := Input{Cube: ptr(10), WeightLbs: 112.5, NMFCCode: "86150", Description: "books"}
+	got := Recommend(in)
+	if got.RecommendedClass != 500 || !got.NMFCFixedClass || got.NMFCSource != "code" {
+		t.Errorf("declared code should win: class=%v fixed=%v source=%q, want 500/true/code",
+			got.RecommendedClass, got.NMFCFixedClass, got.NMFCSource)
+	}
+}
+
+func TestRecommendUnknownCodeFallsBackToDescription(t *testing.T) {
+	// An unknown code falls through to description matching.
+	in := Input{Cube: ptr(10), WeightLbs: 112.5, NMFCCode: "99999", Description: "machine parts"}
+	got := Recommend(in)
+	if got.NMFCCode != "61000" || got.NMFCSource != "description" {
+		t.Errorf("unknown code should fall back to description: code=%q source=%q, want 61000/description",
+			got.NMFCCode, got.NMFCSource)
+	}
+}
+
+func TestRecommendFixedClassNoPackingTip(t *testing.T) {
+	got := Recommend(Input{Length: 48, Width: 40, Height: 36, WeightLbs: 450, Description: "ping pong balls"})
+	if got.PackingTip != "" {
+		t.Errorf("fixed-class item should not get a packing tip, got %q", got.PackingTip)
 	}
 }

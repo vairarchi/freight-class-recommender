@@ -76,9 +76,16 @@ func BoundaryRisk(density float64) (RiskLevel, string) {
 	lower := ClassForDensity(nearest - 1e-9) // class just below the cutoff
 	upper := ClassForDensity(nearest)        // class at/above the cutoff
 	msg := fmt.Sprintf(
-		"Density %s is near the %s cutoff. A small measurement difference could reclassify this between class %s and class %s. Double-check dimensions/weight.",
+		"Density %s is near the %s cutoff (class %s vs %s). ",
 		formatDensity(density), formatDensity(nearest), formatClass(upper), formatClass(lower),
 	)
+	// Directional guidance: just-above a cutoff risks re-measurement into a
+	// pricier class; just-below is a packing opportunity toward a cheaper class.
+	if density >= nearest {
+		msg += "A slightly lower measurement could reclassify it up to the pricier class — declare carefully."
+	} else {
+		msg += "A small packing improvement could legitimately reach the cheaper class."
+	}
 
 	switch {
 	case margin <= 0.015:
@@ -124,13 +131,21 @@ func Recommend(in Input) Recommendation {
 		SelectedClass: in.SelectedClass,
 	}
 
-	// NMFC free-text match: a fixed-class item overrides the density class.
+	// NMFC resolution: a declared code is authoritative and beats description
+	// matching; otherwise fall back to the keyword/LLM matcher.
 	fixedClass := false
-	if item, ok := MatchNMFC(in.Description); ok {
-		rec.NMFCCode = item.Code
-		rec.NMFCDescription = item.Description
-		if item.FixedClass != nil {
-			recommended = *item.FixedClass
+	matched, ok := matchByCode(in.NMFCCode)
+	source := "code"
+	if !ok {
+		matched, ok = MatchNMFC(in.Description)
+		source = "description"
+	}
+	if ok {
+		rec.NMFCCode = matched.Code
+		rec.NMFCDescription = matched.Description
+		rec.NMFCSource = source
+		if matched.FixedClass != nil {
+			recommended = *matched.FixedClass
 			rec.NMFCFixedClass = true
 			fixedClass = true
 		}
@@ -141,6 +156,11 @@ func Recommend(in Input) Recommendation {
 	var riskMsg string
 	if !fixedClass {
 		rec.RiskLevel, riskMsg = BoundaryRisk(density)
+		// Phase 3: concrete packing tip to reach the next cheaper class.
+		if ps, ok := SavingsOpportunity(in, density, cube, recommended); ok {
+			rec.PackingTip = ps.Message
+			rec.TargetClass = float64(ps.TargetClass)
+		}
 	} else {
 		rec.RiskLevel = RiskNone
 	}
