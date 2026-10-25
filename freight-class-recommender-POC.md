@@ -1,7 +1,7 @@
 # Declare It Right, Pay It Right — Freight Class Recommender
 
 **Team:** Right on Class
-**Members:** Shivika Pruthi, Vaibhav Chichmalkar, Abhinav Kumar
+**Members:** Shivika Pruthi, Vaibhav Chichmalkar
 **Track:** Agentify / Agentic Shipping & Mailing Experience
 **Status:** POC — Phase 1 & 2 implemented
 **Last updated:** 2026-10-23
