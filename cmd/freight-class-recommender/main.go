@@ -70,8 +70,8 @@ func main() {
 	setDemoDefaults()
 	pblog.Debugf(context.TODO(), "freight-class-recommender: starting")
 
-	// AI seam: uncomment to swap the deterministic matcher for the LLM one.
-	// freightclass.Matcher = freightclass.NewLLMMatcher()
+	// AI seam: use the Bedrock LLM matcher when configured, else keyword fallback.
+	freightclass.Matcher = freightclass.NewLLMMatcher()
 
 	fcCtx := freightclass.New()
 

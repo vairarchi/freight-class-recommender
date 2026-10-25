@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Freight Class Recommender — Architecture Flow</title>
+  <style>
+    body {
+      margin: 0; background: #ffffff; color: #2b2b33;
+      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wrap { padding: 32px; }
+    h1 {
+      font-size: 20px; margin: 0 0 4px;
+      background: linear-gradient(90deg, #6b1f7c, #cf0989);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    p.sub { margin: 0 0 20px; color: #6b7280; font-size: 13px; }
+    .mermaid { font-size: 15px; }
+    /* For a slide grab: screenshot the .card, or right-click the rendered SVG → Save. */
+    .card {
+      border: 1px solid #e6e6ee; border-radius: 12px; padding: 24px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.06); display: inline-block; background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Declare It Right, Pay It Right — Freight Class Recommender</h1>
+    <p class="sub">Recommendation flow — deterministic core + pluggable AI NMFC matcher</p>
+    <div class="card">
+      <pre class="mermaid">
+flowchart TD
+    A[User enters L / W / H + Weight<br/>Handling Unit demo UI] --> P[POST /api/v1/freightclass/recommend<br/>pbgolib appserver · unauthenticated]
+    P --> D[CubeFromDims = L×W×H / 1728<br/>read-only · from user/dimensioner dims]
+    D --> E[Density = Weight / Cube]
+    E --> H[ClassForDensity + BoundaryRisk<br/>near-cutoff flag · density-based]
+
+    A -.optional.-> N[Description of goods]
+    N --> M[MatchNMFC → active NMFCMatcher]
+    M --> LLM[LLMMatcher · AWS Bedrock Claude<br/>grounded on catalog · confidence-gated]
+    LLM -->|low-confidence / error / not configured| KW[KeywordMatcher fallback<br/>curated catalog]
+    LLM -->|confident| F{Fixed-class<br/>item?}
+    KW --> F
+    F -->|Yes| G[Fixed class overrides density<br/>skip boundary risk]
+    F -->|No / no match| R
+
+    E --> R[Recommend · state machine]
+    H --> R
+    G --> R
+
+    R --> S{Compare with<br/>user selection}
+    S -->|No selection| T[State A: suggest]
+    S -->|Matches| U[State B: confirm]
+    S -->|Higher than needed| V[State C: save]
+    S -->|Lower than needed| W[State D: warn]
+
+    T --> Z[Non-intrusive banner<br/>User decides — no auto-select]
+    U --> Z
+    V --> Z
+    W --> Z
+      </pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      themeVariables: {
+        fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+        primaryColor: "#f6eef8",
+        primaryBorderColor: "#6b1f7c",
+        primaryTextColor: "#2b2b33",
+        lineColor: "#8a5a97",
+        tertiaryColor: "#fdf0f8"
+      },
+      flowchart: { curve: "basis", nodeSpacing: 45, rankSpacing: 55 }
+    });
+  </script>
+</body>
+</html>

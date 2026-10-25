@@ -81,6 +81,7 @@
     .risk-high { color: var(--warn); }
     .risk-medium { color: #b45309; }
     .risk-low { color: var(--muted); }
+    .packing { margin-top: 8px; font-size: 12px; color: var(--confirm); font-weight: 600; }
     .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
   </style>
 </head>
@@ -145,9 +146,13 @@
             <option value="">Select</option>
           </select>
         </div>
+        <div class="field col2">
+          <label for="nmfcCode">NMFC <span class="optional">(optional)</span></label>
+          <input id="nmfcCode" type="text" placeholder="e.g. 86150" />
+        </div>
         <div class="field colfull">
-          <label for="nmfc">NMFC / Description of goods <span class="optional">(optional)</span></label>
-          <input id="nmfc" type="text" placeholder="e.g. ping pong balls, machine parts, books, mattress" />
+          <label for="description">Description of goods <span class="optional">(optional)</span></label>
+          <input id="description" type="text" placeholder="e.g. ping pong balls, machine parts, books, mattress" />
         </div>
       </div>
 
@@ -160,6 +165,7 @@
           <div id="msg" class="msg"></div>
           <div id="meta" class="meta"></div>
           <div id="nmfcInfo" class="meta"></div>
+          <div id="packingTip" class="packing"></div>
           <div id="risk" class="risk"></div>
         </div>
       </div>
@@ -194,7 +200,9 @@
         weightLbs: lbs + oz / 16,
       };
       if (sel.value !== "") payload.selectedClass = parseFloat(sel.value);
-      const desc = el("nmfc").value.trim();
+      const code = el("nmfcCode").value.trim();
+      if (code !== "") payload.nmfcCode = code;
+      const desc = el("description").value.trim();
       if (desc !== "") payload.description = desc;
       return payload;
     }
@@ -216,11 +224,15 @@
         (rec.selectedClass != null ? "  •  Selected: " + rec.selectedClass : "");
       const nmfc = el("nmfcInfo");
       if (rec.nmfcCode) {
+        const src = rec.nmfcSource === "code" ? "declared code" : "matched from description";
         nmfc.textContent = "NMFC " + rec.nmfcCode + " — " + rec.nmfcDescription +
-          (rec.nmfcFixedClass ? "  •  fixed class (overrides density)" : "  •  density-rated");
+          (rec.nmfcFixedClass ? "  •  fixed class (overrides density)" : "  •  density-rated") +
+          "  •  " + src;
       } else {
         nmfc.textContent = "";
       }
+      const packing = el("packingTip");
+      packing.textContent = rec.packingTip ? "💡 " + rec.packingTip : "";
       const risk = el("risk");
       if (rec.riskLevel && rec.riskLevel !== "none") {
         risk.textContent = "Boundary risk: " + rec.riskLevel;
@@ -256,7 +268,7 @@
       timer = setTimeout(recommend, 250);
     }
 
-    for (const id of ["length", "width", "height", "weightLbs", "weightOz", "nmfc"]) {
+    for (const id of ["length", "width", "height", "weightLbs", "weightOz", "nmfcCode", "description"]) {
       el(id).addEventListener("input", schedule);
     }
     sel.addEventListener("change", recommend);
